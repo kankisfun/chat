@@ -132,6 +132,9 @@ def parse_atomowybot_text(text: str, ignored_users=None):
             if skipping_ignored_message:
                 continue
 
+            if username.lower() in ignored:
+                continue
+
             messages.append({
                 "raw_time": raw_time,
                 "offset": parse_hms_to_seconds(raw_time),
