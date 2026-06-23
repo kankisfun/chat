@@ -1,0 +1,31 @@
+# Python
+__pycache__/
+*.py[cod]
+
+# Virtual environments
+.venv/
+venv/
+env/
+
+# IDE
+.vscode/
+.idea/
+
+# Build
+build/
+dist/
+*.spec
+
+# System
+.DS_Store
+Thumbs.db
+
+# Generated files
+*.txt
+*.json
+*.mp4
+
+# Keep example files
+!examples/
+!examples/*.txt
+!examples/*.json
