@@ -101,7 +101,7 @@ def build_body_and_fragments(content: str):
     return body, [{"text": body, "emoticon": None}], []
 
 
-def parse_atomowybot_text(text: str):
+def parse_atomowybot_text(text: str, ignored_users=None):
     """
     Zwraca listę:
     {
@@ -114,6 +114,7 @@ def parse_atomowybot_text(text: str):
     Linie niepasujące do formatu są traktowane jako kontynuacja poprzedniej wiadomości.
     """
     messages = []
+    ignored = parse_ignored_users(ignored_users)
 
     for raw_line in text.splitlines():
         line = raw_line.rstrip("\n\r")
@@ -125,6 +126,9 @@ def parse_atomowybot_text(text: str):
             raw_time = match.group("time")
             username = match.group("user").strip()
             content = match.group("msg")
+
+            if username.lower() in ignored:
+                continue
 
             messages.append({
                 "raw_time": raw_time,
@@ -140,8 +144,8 @@ def parse_atomowybot_text(text: str):
     return messages
 
 
-def convert_atomowybot_to_twitch(text: str):
-    atom_messages = parse_atomowybot_text(text)
+def convert_atomowybot_to_twitch(text: str, ignored_users=None):
+    atom_messages = parse_atomowybot_text(text, ignored_users)
 
     tpl = json.loads(json.dumps(BUILTIN_TEMPLATE))
     tpl["FileInfo"]["CreatedAt"] = iso_now_local()
@@ -341,6 +345,38 @@ def process_chat(data):
 KEYWORDS = ["xd", "KEKW", "cinema", "sad", "oh", "sus", "kekleo", "okurwa"]
 SHOT_DURATION = 30  # seconds
 COOLDOWN = 30       # seconds
+DEFAULT_IGNORED_USERS = ["BotRix"]
+
+
+def parse_ignored_users(value):
+    """Return a normalized set of ignored user names from text/list input."""
+    if value is None:
+        users = DEFAULT_IGNORED_USERS
+    elif isinstance(value, str):
+        users = re.split(r"[,\n;]+", value)
+    else:
+        users = value
+
+    return {str(user).strip().lower() for user in users if str(user).strip()}
+
+
+def get_comment_username(comment):
+    if not isinstance(comment, dict):
+        return ""
+
+    commenter = comment.get("commenter", {})
+    if isinstance(commenter, dict):
+        for key in ["display_name", "name", "login", "user_name", "username"]:
+            value = commenter.get(key)
+            if isinstance(value, str) and value.strip():
+                return value.strip()
+
+    for key in ["display_name", "name", "login", "user_name", "username"]:
+        value = comment.get(key)
+        if isinstance(value, str) and value.strip():
+            return value.strip()
+
+    return ""
 
 
 def emotes_to_plain_text(content):
@@ -439,7 +475,7 @@ def parse_time_to_seconds(value):
     return days * 86400 + hours * 3600 + minutes * 60 + seconds
 
 
-def load_twitch_chat_json_from_data(data):
+def load_twitch_chat_json_from_data(data, ignored_users=None):
     if not isinstance(data, dict):
         raise ValueError("To nie wygląda jak TwitchDownloader Chat.json — główny JSON nie jest obiektem.")
 
@@ -448,9 +484,14 @@ def load_twitch_chat_json_from_data(data):
         raise ValueError("Nie znaleziono listy comments w JSON-ie.")
 
     messages = []
+    ignored = parse_ignored_users(ignored_users)
 
     for comment in comments:
         if not isinstance(comment, dict):
+            continue
+
+        username = get_comment_username(comment)
+        if username.lower() in ignored:
             continue
 
         offset = comment.get("content_offset_seconds")
@@ -473,10 +514,10 @@ def load_twitch_chat_json_from_data(data):
     return messages
 
 
-def load_twitch_chat_json(path):
+def load_twitch_chat_json(path, ignored_users=None):
     with open(path, "r", encoding="utf-8") as f:
         data = json.load(f)
-    return load_twitch_chat_json_from_data(data)
+    return load_twitch_chat_json_from_data(data, ignored_users)
 
 
 def filter_messages_by_range(messages, start_sec=None, end_sec=None):
@@ -627,6 +668,7 @@ class ComboApp(tk.Tk):
         self.reactions_var = tk.BooleanVar(value=False)
         self.start_var = tk.StringVar(value="")
         self.end_var = tk.StringVar(value="")
+        self.ignored_users_var = tk.StringVar(value=", ".join(DEFAULT_IGNORED_USERS))
 
         self._build_gui()
 
@@ -670,16 +712,21 @@ class ComboApp(tk.Tk):
             variable=self.reactions_var,
         ).grid(row=1, column=0, columnspan=4, sticky="w", padx=10, pady=(0, 6))
 
-        tk.Label(options, text="Zakres reakcji od:").grid(row=2, column=0, sticky="w", padx=(10, 4), pady=(0, 8))
-        tk.Entry(options, textvariable=self.start_var, width=16).grid(row=2, column=1, sticky="w", padx=(0, 14), pady=(0, 8))
-        tk.Label(options, text="do:").grid(row=2, column=2, sticky="w", padx=(0, 4), pady=(0, 8))
-        tk.Entry(options, textvariable=self.end_var, width=16).grid(row=2, column=3, sticky="w", padx=(0, 10), pady=(0, 8))
+        tk.Label(options, text="Ignorowani użytkownicy:").grid(row=2, column=0, sticky="w", padx=(10, 4), pady=(0, 8))
+        tk.Entry(options, textvariable=self.ignored_users_var, width=40).grid(row=2, column=1, columnspan=3, sticky="we", padx=(0, 10), pady=(0, 8))
+
+        tk.Label(options, text="Zakres reakcji od:").grid(row=3, column=0, sticky="w", padx=(10, 4), pady=(0, 8))
+        tk.Entry(options, textvariable=self.start_var, width=16).grid(row=3, column=1, sticky="w", padx=(0, 14), pady=(0, 8))
+        tk.Label(options, text="do:").grid(row=3, column=2, sticky="w", padx=(0, 4), pady=(0, 8))
+        tk.Entry(options, textvariable=self.end_var, width=16).grid(row=3, column=3, sticky="w", padx=(0, 10), pady=(0, 8))
 
         tk.Label(
             options,
             text="Zakres możesz zostawić pusty. Format: sekundy, MM:SS, HH:MM:SS albo days:HH:MM:SS.",
             fg="gray",
-        ).grid(row=3, column=0, columnspan=4, sticky="w", padx=10, pady=(0, 8))
+        ).grid(row=4, column=0, columnspan=4, sticky="w", padx=10, pady=(0, 8))
+
+        options.grid_columnconfigure(1, weight=1)
 
         bottom = tk.Frame(self)
         bottom.pack(fill="x", padx=10, pady=(0, 10))
@@ -746,7 +793,8 @@ class ComboApp(tk.Tk):
             return
 
         try:
-            out_data, parsed_count = convert_atomowybot_to_twitch(text)
+            ignored_users = parse_ignored_users(self.ignored_users_var.get())
+            out_data, parsed_count = convert_atomowybot_to_twitch(text, ignored_users)
         except Exception as e:
             messagebox.showerror("Błąd", f"Konwersja nieudana:\n{e}")
             return
@@ -792,7 +840,7 @@ class ComboApp(tk.Tk):
             try:
                 start_sec = parse_time_to_seconds(self.start_var.get())
                 end_sec = parse_time_to_seconds(self.end_var.get())
-                messages = load_twitch_chat_json_from_data(out_data)
+                messages = load_twitch_chat_json_from_data(out_data, ignored_users)
                 if not messages:
                     raise ValueError("Nie znaleziono żadnych wiadomości z content_offset_seconds.")
                 selected_messages = filter_messages_by_range(messages, start_sec, end_sec)
@@ -821,6 +869,7 @@ class ComboApp(tk.Tk):
             "Gotowe",
             f"Zapisano:\n{save_path}\n\nWiadomości: {len(out_data['comments'])}"
             f"\nOstatni offset: {out_data['video']['end']} sekund"
+            f"\nIgnorowani użytkownicy: {', '.join(sorted(ignored_users)) or 'brak'}"
             f"{censor_info}{reactions_info}",
         )
 
