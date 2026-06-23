@@ -115,6 +115,7 @@ def parse_atomowybot_text(text: str, ignored_users=None):
     """
     messages = []
     ignored = parse_ignored_users(ignored_users)
+    skipping_ignored_message = False
 
     for raw_line in text.splitlines():
         line = raw_line.rstrip("\n\r")
@@ -126,6 +127,10 @@ def parse_atomowybot_text(text: str, ignored_users=None):
             raw_time = match.group("time")
             username = match.group("user").strip()
             content = match.group("msg")
+            skipping_ignored_message = username.lower() in ignored
+
+            if skipping_ignored_message:
+                continue
 
             if username.lower() in ignored:
                 continue
@@ -138,7 +143,10 @@ def parse_atomowybot_text(text: str, ignored_users=None):
             })
         else:
             # Awaryjnie: gdy jakaś wiadomość złamie się do kolejnej linii.
-            if messages:
+            # Jeśli poprzednia poprawnie sparsowana linia była od ignorowanego
+            # użytkownika, ignorujemy wszystkie jej kontynuacje aż do kolejnej
+            # linii z timestampem i nickiem.
+            if messages and not skipping_ignored_message:
                 messages[-1]["content"] += "\n" + line
 
     return messages
